@@ -166,8 +166,8 @@ def best_cc_strike(
             candidates = calls[
                 (calls["strike"] >= lo)
                 & (calls["strike"] <= hi)
-                & (calls["bid"] >= 0.30)      # minimum premium worth trading
-                & (calls["openInterest"] >= 100)
+                & (calls["bid"] >= 0.10)      # minimum premium worth trading
+                & (calls["openInterest"] >= 50)
             ].copy()
 
             if candidates.empty:
