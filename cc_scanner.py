@@ -50,26 +50,27 @@ def get_sp500_tickers() -> list[str]:
         tickers = table["Symbol"].str.replace(".", "-", regex=False).tolist()
         return tickers
     except Exception:
-        # Fallback: hardcoded S&P 500 core holdings (top 200 by weight, ~2025)
+        # Fallback: hardcoded S&P 500 core holdings (top ~200 by weight, updated 2025)
         return [
             "AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA","GOOG","BRK-B","AVGO",
             "JPM","LLY","UNH","V","XOM","MA","COST","HD","PG","NFLX","JNJ","ABBV",
             "BAC","CRM","WMT","CVX","MRK","ORCL","ACN","AMD","PEP","KO","TMO","ADBE",
             "MCD","ABT","CSCO","GE","LIN","DHR","PM","TXN","CAT","IBM","INTU","AMGN",
             "QCOM","GS","RTX","ISRG","SPGI","BLK","NOW","BKNG","AXP","ELV","T","VRTX",
-            "SYK","GILD","MDT","MMC","LRCX","ADI","REGN","CI","PGR","MU","DE","PANW",
+            "SYK","GILD","MDT","LRCX","ADI","REGN","CI","PGR","MU","DE","PANW",
             "SCHW","TJX","BSX","ZTS","AMAT","CB","AON","SO","ETN","CME","ITW","EOG",
             "PLD","WM","MCO","MSI","NOC","APH","MMM","USB","DUK","COF","EMR","PSA",
             "FCX","HCA","FDX","NSC","SHW","TFC","CL","ECL","WMB","OKE","CSX","TEL",
             "PH","CARR","GWW","WELL","ROP","EW","HLT","CTAS","AIG","AFL","DG","FICO",
             "ALL","NKE","GPC","RSG","PWR","FAST","EXC","AME","KEYS","TROW","MTB",
             "WAB","OTIS","HPQ","VRSK","CTSH","LHX","BDX","PPG","XYL","CDW","BALL",
-            "NUE","WAT","FTV","GIS","SYY","VLTO","EPAM","AVB","SBUX","IDXX","DXCM",
-            "ANSS","VICI","IRM","CBOE","WEC","WTW","PTC","BAX","MKC","IR","ATO",
-            "RF","FITB","STT","HBAN","CFG","KEY","ZION","CMA","PBCT","MTD","A",
-            "IQV","PKI","CPRT","CINF","LVS","MGM","CZR","WYNN","RCL","CCL","DAL",
-            "UAL","AAL","LUV","JBLU","ALK","EXPE","BKNG","ABNB","MAR","H","HLT",
-            "IHG","CHH","VAC","TNL","PVH","RL","TPR","VFC","HBI","UAA","UA","GPS",
+            "NUE","WAT","GIS","SYY","AVB","SBUX","IDXX","DXCM","RVTY",
+            "VICI","IRM","CBOE","WEC","WTW","PTC","BAX","MKC","IR","ATO",
+            "RF","FITB","STT","HBAN","CFG","KEY","ZION","MTD","A",
+            "IQV","CPRT","CINF","LVS","MGM","CZR","WYNN","RCL","CCL","DAL",
+            "UAL","AAL","LUV","JBLU","ALK","ABNB","MAR","H","PVH","RL","TPR","VFC",
+            "SNPS","CDNS","MPWR","ENPH","FSLR","CEG","VST","NRG","AES","ETR",
+            "PPL","CMS","NI","AEE","LNT","EVRG","PNW","NWE","OGE","SR",
         ]
 
 
@@ -260,13 +261,29 @@ with st.spinner("Downloading price history (cached after first run)…"):
 prog.progress(35, text="Calculating indicators…")
 
 # Normalise to flat Close/Volume DataFrames regardless of yfinance MultiIndex version
-if isinstance(raw.columns, pd.MultiIndex):
-    close_df = raw["Close"]
-    vol_df   = raw["Volume"]
-else:
-    # Single ticker — shouldn't happen for a list, but guard anyway
-    close_df = raw[["Close"]].rename(columns={"Close": universe[0]})
-    vol_df   = raw[["Volume"]].rename(columns={"Volume": universe[0]})
+try:
+    if isinstance(raw.columns, pd.MultiIndex):
+        level0 = raw.columns.get_level_values(0).unique().tolist()
+        level1 = raw.columns.get_level_values(1).unique().tolist()
+        if "Close" in level0:
+            # Standard yfinance 0.2.x: level0=Price, level1=Ticker
+            close_df = raw["Close"].copy()
+            vol_df   = raw["Volume"].copy() if "Volume" in level0 else pd.DataFrame()
+        elif "Close" in level1:
+            # Transposed: level0=Ticker, level1=Price
+            close_df = raw.xs("Close", level=1, axis=1).copy()
+            vol_df   = raw.xs("Volume", level=1, axis=1).copy() if "Volume" in level1 else pd.DataFrame()
+        else:
+            st.error(f"Unexpected column structure. Level 0: {level0[:5]}, Level 1: {level1[:5]}")
+            st.stop()
+    else:
+        close_df = raw[["Close"]].copy()
+        vol_df   = raw[["Volume"]].copy()
+
+    st.sidebar.caption(f"✅ {len(close_df.columns)} tickers loaded | sample: {list(close_df.columns[:4])}")
+except Exception as e:
+    st.error(f"Data parsing error: {e}\nRaw columns (first 10): {raw.columns[:10].tolist()}")
+    st.stop()
 
 # ── Step 3: technical pre-screen ─────────────────────────────────────────────
 
