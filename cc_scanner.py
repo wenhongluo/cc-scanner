@@ -114,14 +114,17 @@ def hv_percentile(series: pd.Series, hv_window: int = 30, lookback: int = 252) -
     """
     Rank current 30-day HV against trailing `lookback` daily HV values.
     Returns a 0–100 percentile (HVP).  Used as a free proxy for IVP.
+    Uses all available history if < lookback values exist (e.g. 1-year download).
     """
     log_ret = np.log(series / series.shift(1)).dropna()
     rolling_hv = log_ret.rolling(hv_window).std() * np.sqrt(252) * 100
     rolling_hv = rolling_hv.dropna()
-    if len(rolling_hv) < lookback + 1:
+    if len(rolling_hv) < 30:          # need at least 30 data points
         return np.nan
-    hist = rolling_hv.iloc[-(lookback + 1) : -1]
     current = rolling_hv.iloc[-1]
+    hist = rolling_hv.iloc[-min(lookback, len(rolling_hv) - 1) - 1 : -1]
+    if hist.empty:
+        return np.nan
     return round(float((hist < current).mean() * 100), 1)
 
 
