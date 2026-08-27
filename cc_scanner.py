@@ -137,43 +137,43 @@ def best_cc_strike(
     dte_max: int,
     otm_lo: float,
     otm_hi: float,
-) -> dict | None:
+) -> tuple[dict | None, str | None]:
     """
     For a given ticker, find the best OTM call in the target DTE window.
-    Returns a dict with strike/bid/IV/OI/ann_yield or None.
+    Returns (result_dict, None) on success or (None, error_str) on failure.
     """
     try:
         t = yf.Ticker(symbol)
         expirations = t.options
         if not expirations:
-            return None
+            return None, "no expirations returned"
 
         today = datetime.today()
+        in_window = [e for e in expirations
+                     if dte_min <= (datetime.strptime(e, "%Y-%m-%d") - today).days <= dte_max]
 
-        for exp_str in expirations:
+        if not in_window:
+            dte_vals = [(datetime.strptime(e, "%Y-%m-%d") - today).days for e in expirations[:5]]
+            return None, f"no expiration in {dte_min}-{dte_max} DTE window (available: {dte_vals})"
+
+        for exp_str in in_window:
             exp_date = datetime.strptime(exp_str, "%Y-%m-%d")
             dte = (exp_date - today).days
-            if dte < dte_min:
-                continue
-            if dte > dte_max:
-                break  # expirations are sorted ascending
 
             calls = t.option_chain(exp_str).calls
 
-            # Strike filter: OTM by otm_lo% to otm_hi%
             lo = stock_price * (1 + otm_lo)
             hi = stock_price * (1 + otm_hi)
             candidates = calls[
                 (calls["strike"] >= lo)
                 & (calls["strike"] <= hi)
-                & (calls["bid"] >= 0.10)      # minimum premium worth trading
+                & (calls["bid"] >= 0.10)
                 & (calls["openInterest"] >= 50)
             ].copy()
 
             if candidates.empty:
                 continue
 
-            # Pick richest bid
             row = candidates.sort_values("bid", ascending=False).iloc[0]
             ann_yield = (row["bid"] / stock_price) / (dte / 365) * 100
 
@@ -185,12 +185,12 @@ def best_cc_strike(
                 "iv_pct": round(float(row["impliedVolatility"]) * 100, 1),
                 "open_interest": int(row["openInterest"]),
                 "ann_yield_pct": round(ann_yield, 1),
-            }
+            }, None
 
-    except Exception:
-        pass
+        return None, f"expirations in window but no strikes in {otm_lo*100:.0f}–{otm_hi*100:.0f}% OTM range"
 
-    return None
+    except Exception as e:
+        return None, str(e)
 
 
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
@@ -350,15 +350,18 @@ if not passed:
     st.warning("No stocks passed the pre-screen. Try relaxing filters (price range, RSI, HVP).")
     st.stop()
 
+st.info(f"Pre-screen passed: **{len(passed)} stocks** — {[r['Ticker'] for r in passed[:10]]}…")
+
 # ── Step 4: options chain pull ────────────────────────────────────────────────
 
 final: list[dict] = []
+opt_errors: list[str] = []
 
 for j, row in enumerate(passed):
     frac = j / len(passed)
     prog.progress(65 + int(frac * 30), text=f"Options: {row['Ticker']} ({j+1}/{len(passed)})…")
 
-    cc = best_cc_strike(
+    cc, err = best_cc_strike(
         symbol      = row["Ticker"],
         stock_price = row["Price"],
         dte_min     = dte_min,
@@ -377,18 +380,20 @@ for j, row in enumerate(passed):
             "OI":           cc["open_interest"],
             "Ann Yield %":  cc["ann_yield_pct"],
         }})
+    elif err:
+        opt_errors.append(f"{row['Ticker']}: {err}")
 
-    time.sleep(0.05)  # gentle rate limiting
+    time.sleep(0.3)  # rate limiting — yfinance options needs more breathing room
 
 prog.progress(100, text="Done!")
 
 # ── Step 5: results ───────────────────────────────────────────────────────────
 
 if not final:
-    st.warning(
-        "Options screen returned no results. "
-        "Try widening the DTE window or OTM % range, or lowering the min bid."
-    )
+    st.warning("Options screen returned no results.")
+    if opt_errors:
+        with st.expander(f"Debug: {len(opt_errors)} option errors (first 10)"):
+            st.text("\n".join(opt_errors[:10]))
     st.stop()
 
 df = pd.DataFrame(final).sort_values("Ann Yield %", ascending=False).reset_index(drop=True)
@@ -406,7 +411,7 @@ def colour_yield(val):
         return "background-color: #40916c; color: white"
     return ""
 
-styled = df.style.applymap(colour_yield, subset=["Ann Yield %"])
+styled = df.style.map(colour_yield, subset=["Ann Yield %"])
 st.dataframe(styled, use_container_width=True, hide_index=True)
 
 # ── Download ──────────────────────────────────────────────────────────────────
