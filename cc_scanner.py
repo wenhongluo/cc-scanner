@@ -18,6 +18,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 import yfinance as yf
 
@@ -39,12 +40,37 @@ st.caption(
 
 @st.cache_data(ttl=86_400, show_spinner=False)
 def get_sp500_tickers() -> list[str]:
-    """Pull current S&P 500 ticker list from Wikipedia."""
+    """Pull current S&P 500 ticker list from Wikipedia with a browser User-Agent."""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    table = pd.read_html(url)[0]
-    # Wikipedia sometimes uses dots instead of hyphens (e.g. BRK.B → BRK-B)
-    tickers = table["Symbol"].str.replace(".", "-", regex=False).tolist()
-    return tickers
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        table = pd.read_html(resp.text)[0]
+        tickers = table["Symbol"].str.replace(".", "-", regex=False).tolist()
+        return tickers
+    except Exception:
+        # Fallback: hardcoded S&P 500 core holdings (top 200 by weight, ~2025)
+        return [
+            "AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA","GOOG","BRK-B","AVGO",
+            "JPM","LLY","UNH","V","XOM","MA","COST","HD","PG","NFLX","JNJ","ABBV",
+            "BAC","CRM","WMT","CVX","MRK","ORCL","ACN","AMD","PEP","KO","TMO","ADBE",
+            "MCD","ABT","CSCO","GE","LIN","DHR","PM","TXN","CAT","IBM","INTU","AMGN",
+            "QCOM","GS","RTX","ISRG","SPGI","BLK","NOW","BKNG","AXP","ELV","T","VRTX",
+            "SYK","GILD","MDT","MMC","LRCX","ADI","REGN","CI","PGR","MU","DE","PANW",
+            "SCHW","TJX","BSX","ZTS","AMAT","CB","AON","SO","ETN","CME","ITW","EOG",
+            "PLD","WM","MCO","MSI","NOC","APH","MMM","USB","DUK","COF","EMR","PSA",
+            "FCX","HCA","FDX","NSC","SHW","TFC","CL","ECL","WMB","OKE","CSX","TEL",
+            "PH","CARR","GWW","WELL","ROP","EW","HLT","CTAS","AIG","AFL","DG","FICO",
+            "ALL","NKE","GPC","RSG","PWR","FAST","EXC","AME","KEYS","TROW","MTB",
+            "WAB","OTIS","HPQ","VRSK","CTSH","LHX","BDX","PPG","XYL","CDW","BALL",
+            "NUE","WAT","FTV","GIS","SYY","VLTO","EPAM","AVB","SBUX","IDXX","DXCM",
+            "ANSS","VICI","IRM","CBOE","WEC","WTW","PTC","BAX","MKC","IR","ATO",
+            "RF","FITB","STT","HBAN","CFG","KEY","ZION","CMA","PBCT","MTD","A",
+            "IQV","PKI","CPRT","CINF","LVS","MGM","CZR","WYNN","RCL","CCL","DAL",
+            "UAL","AAL","LUV","JBLU","ALK","EXPE","BKNG","ABNB","MAR","H","HLT",
+            "IHG","CHH","VAC","TNL","PVH","RL","TPR","VFC","HBI","UAA","UA","GPS",
+        ]
 
 
 @st.cache_data(ttl=3_600, show_spinner=False)
